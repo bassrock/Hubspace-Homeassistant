@@ -1,18 +1,61 @@
-import requests
-import json
-import re
+import asyncio
+import base64
 import calendar
+import copy
 import datetime
 import hashlib
-import base64
-import os
-import asyncio
+import json
 import logging
+import os
+import re
+from typing import Optional
+
+import requests
+
+from .const import TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class HubSpace:
+class HubspaceRawDevice:
+    deviceClass: str  # fan, switch, light, power-outlet, ceiling-fan
+    id: str
+    deviceId: str
+    deviceId: str
+    model: str
+    friendlyName: str
+    functions: list[dict[str, any]]
+    state: list[dict[str, any]]
+    outletIndex: Optional[int]
+    children: list["HubspaceRawDevice"] = []
+
+    def __init__(
+        self,
+        id: str,
+        deviceId: str,
+        model: str,
+        deviceClass: str,
+        friendlyName: str,
+        functions: list[dict[str, any]],
+        state: list[dict[str, any]],
+        outletIndex: Optional[int] = None,
+    ) -> None:
+        self.id = id
+        self.deviceId = deviceId
+        self.model = model
+        self.deviceClass = deviceClass
+        self.friendlyName = friendlyName
+        self.functions = functions
+        self.state = state
+        self.outletIndex = outletIndex
+        self
+
+    def addChild(self, device: "HubspaceRawDevice"):
+        self.children.append(device)
+
+
+class Hubspace:
+    """Class to test interaction with Hubspace."""
 
     _refresh_token = None
     _password = None
@@ -23,11 +66,22 @@ class HubSpace:
     # Token lasts 120 seconds
     _token_duration = 118 * 1000
 
-    def __init__(self, username, password):
+    # all the devices returned from the metadata array
+    _raw_devices = []
+
+    # all the devices categorized with children under them
+    _devices: dict[str, HubspaceRawDevice] = {}
+
+    def __init__(self, username, password) -> None:
+        """Init the hubspace hub."""
         self._username = username
         self._password = password
+
+    def authenticate(self) -> bool:
+        """Test if we can authenticate with the host."""
         self._refresh_token = self.getRefreshCode()
         self._accountId = self.getAccountId()
+        return self._refresh_token is not None and self._accountId is not None
 
     def getUTCTime(self):
         date = datetime.datetime.utcnow()
@@ -43,7 +97,6 @@ class HubSpace:
         return code_challenge, code_verifier
 
     def getRefreshCode(self):
-
         URL = "https://accounts.hubspaceconnect.com/auth/realms/thd/protocol/openid-connect/auth"
 
         [code_challenge, code_verifier] = self.getCodeVerifierAndChallenge()
@@ -87,17 +140,15 @@ class HubSpace:
             "credentialId": "",
         }
 
-        headers = {}
         r = requests.post(
             auth_url,
             data=auth_data,
             headers=auth_header,
             cookies=r.cookies.get_dict(),
             allow_redirects=False,
+            timeout=TIMEOUT,
         )
         r.close()
-        # print("first headers")
-        # print(r.headers)
         location = r.headers.get("location")
 
         session_state = re.search("session_state=(.+?)&code", location).group(1)
@@ -119,24 +170,24 @@ class HubSpace:
             "client_id": "hubspace_android",
         }
 
-        headers = {}
-        r = requests.post(auth_url, data=auth_data, headers=auth_header)
+        r = requests.post(
+            auth_url, data=auth_data, headers=auth_header, timeout=TIMEOUT
+        )
         r.close()
         refresh_token = r.json().get("refresh_token")
         # print(refresh_token)
         return refresh_token
 
     def getAuthTokenFromRefreshToken(self):
-
         utcTime = self.getUTCTime()
 
         if self._last_token is not None and (
             (utcTime - self._last_token_time) < self._token_duration
         ):
-            # _LOGGER.debug("Resuse Token")
+            _LOGGER.debug("Resuse Token")
             return self._last_token
 
-        # _LOGGER.debug("Get New Token")
+        _LOGGER.debug("Get New Token")
         auth_url = "https://accounts.hubspaceconnect.com/auth/realms/thd/protocol/openid-connect/token"
 
         auth_header = {
@@ -152,8 +203,9 @@ class HubSpace:
             "client_id": "hubspace_android",
         }
 
-        headers = {}
-        r = requests.post(auth_url, data=auth_data, headers=auth_header)
+        r = requests.post(
+            auth_url, data=auth_data, headers=auth_header, timeout=TIMEOUT
+        )
         r.close()
         token = r.json().get("id_token")
         self._last_token = token
@@ -162,7 +214,6 @@ class HubSpace:
         return token
 
     def getAccountId(self):
-
         token = self.getAuthTokenFromRefreshToken()
         auth_url = "https://api2.afero.net/v1/users/me"
 
@@ -174,17 +225,14 @@ class HubSpace:
         }
 
         auth_data = {}
-        headers = {}
-        r = requests.get(auth_url, data=auth_data, headers=auth_header)
+        r = requests.get(auth_url, data=auth_data, headers=auth_header, timeout=TIMEOUT)
         r.close()
         accountId = r.json().get("accountAccess")[0].get("account").get("accountId")
         return accountId
 
     def getMetadeviceInfo(self):
-
         token = self.getAuthTokenFromRefreshToken()
 
-        _LOGGER.debug("token " + token)
         auth_header = {
             "user-agent": "Dart/2.15 (dart:io)",
             "host": "semantics2.afero.net",
@@ -192,7 +240,6 @@ class HubSpace:
             "authorization": "Bearer " + token,
         }
 
-        _LOGGER.debug("token " + self._accountId)
         auth_url = (
             "https://api2.afero.net/v1/accounts/"
             + self._accountId
@@ -200,403 +247,113 @@ class HubSpace:
         )
 
         auth_data = {}
-        headers = {}
-        r = requests.get(auth_url, data=auth_data, headers=auth_header)
+        r = requests.get(auth_url, data=auth_data, headers=auth_header, timeout=TIMEOUT)
         r.close()
 
         return r
 
-    def getChildrenFromRoom(self, roomName):
-
-        response = self.getMetadeviceInfo()
-
-        children = None
-
-        for lis in response.json():
-            for key, val in lis.items():
-                if key == "friendlyName" and val == roomName:
-                    if lis.get("typeId") == "metadevice.room":
-                        children = lis.get("children")
-                        _LOGGER.debug("Room Children")
-                        _LOGGER.debug(children)
-                        return children
-
-        _LOGGER.debug("No children found ")
-        return children
-
-    def getChildInfoById(self, childId):
-
-        response = self.getMetadeviceInfo()
-
-        child = None
-        model = None
-        deviceId = None
-        deviceClass = None
-        friendlyName = None
-
-        for lis in response.json():
-            for key, val in lis.items():
-                if (
-                    key == "id"
-                    and val == childId
-                    and lis.get("typeId") == "metadevice.device"
-                ):
-                    # print(key, val)
-                    # _LOGGER.debug('getChildInfoById match')
-                    # _LOGGER.debug(lis)
-                    child = lis.get("id")
-                    deviceId = lis.get("deviceId")
-                    model = lis.get("description").get("device").get("model")
-                    deviceClass = (
-                        lis.get("description").get("device").get("deviceClass")
-                    )
-                    friendlyName = lis.get("friendlyName")
-                    defaultName = (
-                        lis.get("description").get("device").get("defaultName")
-                    )
-                    defaultImage = (
-                        lis.get("description").get("defaultImage")
-                    )
-                    if model is not None and deviceClass is not None and defaultName is not None and defaultImage is not None:
-                        if model == "" and defaultImage == "ceiling-fan-snyder-park-icon":
-                            model = "DriskolFan"
-                        if deviceClass == "fan" and model == "TBD":
-                            model = "ZandraFan"
-                        if deviceClass == "fan" and model == "" and defaultImage == "ceiling-fan-slender-icon":
-                            model = "TagerFan"
-                        if defaultName == "Smart Stake Timer":
-                            model = "YardStake"
-                            deviceClass = "light"
-                        if defaultImage == "a19-e26-color-cct-60w-smd-frosted-icon":
-                            model = "12A19060WRGBWH2"
-                        return child, model, deviceId, deviceClass, friendlyName
-
-        # _LOGGER.debug("No model found ")
-        return child, model, deviceId, deviceClass, friendlyName
-
-    def getChildId(self, deviceName):
-
-        response = self.getMetadeviceInfo()
-
-        child = None
-        model = None
-        deviceId = None
-        deviceClass = None
-
-        # _LOGGER.debug("############ Dumping all info 1 0f 2 #########")
-        # _LOGGER.debug(json.dumps(response.json(), indent=4, sort_keys=True))
-        # _LOGGER.debug("############ End Dump #########")
-
-        for lis in response.json():
-            for key, val in lis.items():
-                if (
-                    key == "friendlyName"
-                    and val == deviceName
-                    and lis.get("typeId") == "metadevice.device"
-                ):
-                    # print(key, val)
-                    # _LOGGER.debug('Printing Possible Error')
-                    # _LOGGER.debug(lis)
-                    child = lis.get("id")
-                    deviceId = lis.get("deviceId")
-                    model = lis.get("description").get("device").get("model")
-                    deviceClass = (
-                        lis.get("description").get("device").get("deviceClass")
-                    )
-                    defaultName = (
-                        lis.get("description").get("device").get("defaultName")
-                    )
-                    defaultImage = (
-                        lis.get("description").get("defaultImage")
-                    )
-                    if model is not None and deviceClass is not None and defaultName is not None and defaultImage is not None:
-                        if model == "" and defaultImage == "ceiling-fan-snyder-park-icon":
-                            model = "DriskolFan"
-                        if deviceClass == "fan" and model == "TBD":
-                            model = "ZandraFan"
-                        if deviceClass == "fan" and model == "" and defaultImage == "ceiling-fan-slender-icon":
-                            model = "TagerFan"
-                        if defaultName == "Smart Stake Timer":
-                            model = "YardStake"
-                            deviceClass = "light"
-                        if defaultImage == "a19-e26-color-cct-60w-smd-frosted-icon":
-                            model = "12A19060WRGBWH2"    
-                        return child, model, deviceId, deviceClass
-
-        # _LOGGER.debug("No model found ")
-        return child, model, deviceId, deviceClass
-
     def discoverDeviceIds(self):
         response = self.getMetadeviceInfo()
 
-        for lis in response.json():
-            if lis.get("typeId") == "metadevice.device":
-                child = lis.get("id")
-                deviceId = lis.get("deviceId")
-                model = lis.get("description", {}).get("device", {}).get("model")
+        results = response.json()
+
+        _devices: dict[str, HubspaceRawDevice] = {}
+
+        # do 1 loop to get all the devices that have childen
+        for lis in results:
+            if (
+                lis.get("typeId") == "metadevice.device"
+                and len(lis.get("children", [])) != 0
+            ):
+                device = HubspaceRawDevice(
+                    id=lis.get("id"),
+                    deviceId=lis.get("deviceId"),
+                    deviceClass=lis.get("description", {})
+                    .get("device", {})
+                    .get("deviceClass"),
+                    model=lis.get("description", {}).get("device", {}).get("model"),
+                    friendlyName=lis.get("friendlyName"),
+                    functions=lis.get("description", {}).get("functions", []),
+                    state=lis.get("state", {}).get("values", []),
+                )
+                _devices[device.deviceId] = device
+
+        # loop again to get all the devices that do no have childen.
+        for lis in results:
+            if (
+                lis.get("typeId") == "metadevice.device"
+                and len(lis.get("children", [])) == 0
+            ):
                 deviceClass = (
                     lis.get("description", {}).get("device", {}).get("deviceClass")
                 )
-                friendlyName = lis.get("friendlyName")
                 functions = lis.get("description", {}).get("functions", [])
-                yield child, model, deviceId, deviceClass, friendlyName, functions
+                deviceId = lis.get("deviceId")
+                device = None
 
-    def getFunctions(self, id, functionClass=None):
-        response = self.getMetadeviceInfo()
+                # Some extra work because outlets are 2 seperate entities, but 1 device.
+                if deviceClass == "power-outlet":
+                    for function in functions:
+                        if function.get("functionClass") == "toggle":
+                            try:
+                                _LOGGER.debug(
+                                    f"Found toggle with id {function.get('id')} and instance {function.get('functionInstance')}"
+                                )
+                                outletIndex = function.get("functionInstance").split(
+                                    "-"
+                                )[1]
+                                device = HubspaceRawDevice(
+                                    id=lis.get("id"),
+                                    deviceId=lis.get("deviceId"),
+                                    deviceClass=deviceClass,
+                                    model=lis.get("description", {})
+                                    .get("device", {})
+                                    .get("model"),
+                                    friendlyName=lis.get("friendlyName"),
+                                    functions=functions,
+                                    state=lis.get("state", {}).get("values", []),
+                                    outletIndex=outletIndex,
+                                )
+                                deviceId = f"{device.deviceId}_{outletIndex}"
+                                _devices[deviceId] = device
+                            except IndexError:
+                                _LOGGER.debug("Error extracting outlet index")
+                else:
+                    device = HubspaceRawDevice(
+                        id=lis.get("id"),
+                        deviceId=deviceId,
+                        deviceClass=deviceClass,
+                        model=lis.get("description", {}).get("device", {}).get("model"),
+                        friendlyName=lis.get("friendlyName"),
+                        functions=functions,
+                        state=lis.get("state", {}).get("values", []),
+                    )
+                    if deviceId in _devices:
+                        _devices[deviceId].addChild(device=device)
+                    else:
+                        _devices[deviceId] = device
+        self._devices = _devices
 
-        for lis in response.json():
-            if lis.get("id") == id:
-                functions = lis.get("description", {}).get("functions", [])
-                if functionClass is None:
-                    return functions
-                for function in functions:
-                    if function.get("functionClass") == functionClass:
-                        yield function
-
-    def getState(self, child, desiredStateName):
-
-        state = None
-
-        token = self.getAuthTokenFromRefreshToken()
-        if token is None:
-            _LOGGER.debug("No token retrieved")
-            return None
-
-        auth_header = {
-            "user-agent": "Dart/2.15 (dart:io)",
-            "host": "semantics2.afero.net",
-            "accept-encoding": "gzip",
-            "authorization": "Bearer " + token,
-        }
-        auth_url = (
-            "https://api2.afero.net/v1/accounts/"
-            + self._accountId
-            + "/metadevices/"
-            + child
-            + "/state"
-        )
-        auth_data = {}
-        headers = {}
-
-        r = requests.get(auth_url, data=auth_data, headers=auth_header)
-        r.close()
-        if r.ok:
-            for lis in r.json().get("values"):
-                for key, val in lis.items():
-                    if key == "functionClass" and val == desiredStateName:
-                        state = lis.get("value")
-                    if key == "functionClass" and val == "available" and not lis.get("value"):
-                        return None 
-                        #return None
-
-        # print(desiredStateName + ": " + state)
-        return state
-
-    def getStateInstance(self, child, desiredStateName, desiredFunctionInstance):
-
-        state = None
-
-        token = self.getAuthTokenFromRefreshToken()
-
-        auth_header = {
-            "user-agent": "Dart/2.15 (dart:io)",
-            "host": "semantics2.afero.net",
-            "accept-encoding": "gzip",
-            "authorization": "Bearer " + token,
-        }
-        auth_url = (
-            "https://api2.afero.net/v1/accounts/"
-            + self._accountId
-            + "/metadevices/"
-            + child
-            + "/state"
-        )
-        auth_data = {}
-        headers = {}
-
-        r = requests.get(auth_url, data=auth_data, headers=auth_header)
-        r.close()
-        if r.ok:
-            for lis in r.json().get("values"):
-                for key, val in lis.items():
-                    if key == "functionClass" and val == "available" and not lis.get("value"):
-                        return None  
-                    if (
-                        key == "functionClass"
-                        and val == desiredStateName
-                        and lis.get("functionInstance") == desiredFunctionInstance
-                    ):
-                        state = lis.get("value")
-
-        # print(desiredStateName + ": " + state)
-        return state
-
-    def getDebugInfo(self, child):
-
-        state = None
-
-        r = self.getMetadeviceInfo()
-
-        _LOGGER.debug("############ Dumping all info 1 0f 2 #########")
-        _LOGGER.debug(json.dumps(r.json(), indent=4, sort_keys=True))
-        _LOGGER.debug("############ End Dump #########")
-
-        token = self.getAuthTokenFromRefreshToken()
-        auth_url = (
-            "https://api2.afero.net/v1/accounts/"
-            + self._accountId
-            + "/metadevices/"
-            + child
-            + "/state"
-        )
-        auth_header = {
-            "user-agent": "Dart/2.15 (dart:io)",
-            "host": "semantics2.afero.net",
-            "accept-encoding": "gzip",
-            "authorization": "Bearer " + token,
+    @property
+    def lights(self) -> dict[str, HubspaceRawDevice]:
+        return {
+            key: value
+            for key, value in self._devices.items()
+            if value.deviceClass == "light"
         }
 
-        auth_data = {}
-
-        r = requests.get(auth_url, data=auth_data, headers=auth_header)
-        r.close()
-        _LOGGER.debug("############ Dumping all info 2 0f 2 #########")
-        _LOGGER.debug(json.dumps(r.json(), indent=4, sort_keys=True))
-        _LOGGER.debug("############ End Dump #########")
-        return r.json()
-
-    def getPowerState(self, child):
-        return self.getState(child, "power")
-
-    def setState(self, child, desiredStateName, state, instanceField=None):
-
-        token = self.getAuthTokenFromRefreshToken()
-
-        auth_data = {}
-        headers = {}
-
-        utc_time = self.getUTCTime()
-        payload = {
-            "metadeviceId": str(child),
-            "values": [
-                {
-                    "functionClass": desiredStateName,
-                    "lastUpdateTime": utc_time,
-                    "value": state,
-                }
-            ],
+    @property
+    def ceilingFans(self) -> dict[str, HubspaceRawDevice]:
+        return {
+            key: value
+            for key, value in self._devices.items()
+            if value.deviceClass == "ceiling-fan"
         }
 
-        if instanceField is not None:
-            payload["values"][0]["functionInstance"] = instanceField
-            _LOGGER.debug("setting state with instance: " + instanceField)
-
-        auth_header = {
-            "user-agent": "Dart/2.15 (dart:io)",
-            "host": "semantics2.afero.net",
-            "accept-encoding": "gzip",
-            "authorization": "Bearer " + token,
-            "content-type": "application/json; charset=utf-8",
+    @property
+    def switches(self) -> dict[str, HubspaceRawDevice]:
+        return {
+            key: value
+            for key, value in self._devices.items()
+            if value.deviceClass in ("switch", "power-outlet")
         }
-
-        auth_url = (
-            "https://api2.afero.net/v1/accounts/"
-            + self._accountId
-            + "/metadevices/"
-            + child
-            + "/state"
-        )
-        r = requests.put(auth_url, json=payload, headers=auth_header)
-        r.close()
-        for lis in r.json().get("values"):
-            for key, val in lis.items():
-                if key == "functionClass" and val == desiredStateName:
-                    state = lis.get("value")
-
-        # print(desiredStateName + ": " + state)
-        return state
-
-    def setStateInstance(self, child, desiredStateName, desiredFunctionInstance, state):
-
-        token = self.getAuthTokenFromRefreshToken()
-
-        auth_data = {}
-        headers = {}
-
-        utc_time = self.getUTCTime()
-        payload = {
-            "metadeviceId": str(child),
-            "values": [
-                {
-                    "functionClass": desiredStateName,
-                    "functionInstance": desiredFunctionInstance,
-                    "lastUpdateTime": utc_time,
-                    "value": state,
-                }
-            ],
-        }
-
-        auth_header = {
-            "user-agent": "Dart/2.15 (dart:io)",
-            "host": "semantics2.afero.net",
-            "accept-encoding": "gzip",
-            "authorization": "Bearer " + token,
-            "content-type": "application/json; charset=utf-8",
-        }
-
-        auth_url = (
-            "https://api2.afero.net/v1/accounts/"
-            + self._accountId
-            + "/metadevices/"
-            + child
-            + "/state"
-        )
-        r = requests.put(auth_url, json=payload, headers=auth_header)
-        r.close()
-
-    def setPowerState(self, child, state, powerFunctionInstance=None):
-        self.setState(child, "power", state, powerFunctionInstance)
-
-    async def getConclave(self):
-
-        token = self.getAuthTokenFromRefreshToken()
-
-        auth_data = {}
-        headers = {}
-
-        payload = {"softHub": "false", "user": "true"}
-
-        auth_header = {
-            "user-agent": "Dart/2.15 (dart:io)",
-            "host": "api2.afero.net",
-            "accept-encoding": "gzip",
-            "authorization": "Bearer " + token,
-            "content-type": "application/json; charset=utf-8",
-        }
-
-        auth_url = (
-            "https://api2.afero.net/v1/accounts/" + self._accountId + "/conclaveAccess"
-        )
-        r = requests.post(auth_url, json=payload, headers=auth_header)
-        r.close()
-        # print(json.dumps(r.json(), indent=4, sort_keys=True))
-        host = r.json().get("conclave").get("host")
-        port = r.json().get("conclave").get("port")
-        token = r.json().get("tokens")[0].get("token")
-        expiresTimestamp = r.json().get("tokens")[0].get("expiresTimestamp")
-
-    def setRGB(self, child, r, g, b):
-        # assume r,g,b 0-255
-        state = {"color-rgb": {"r": r, "b": b, "g": g}}
-        self.setState(child, "color-rgb", state)
-        self.setState(child, "color-mode", "color")
-
-    def getRGB(self, child):
-        state = self.getState(child, "color-rgb")
-        if state is None:
-            return None
-            
-        r = int(state.get("color-rgb").get("r"))
-        g = int(state.get("color-rgb").get("g"))
-        b = int(state.get("color-rgb").get("b"))
-        return (r, g, b)
