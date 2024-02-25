@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, DEVICE_ID
+from .const import DOMAIN
 from .hubspace import Hubspace, HubspaceRawDevice
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,10 +23,7 @@ async def async_setup_entry(
     """Set up the fan platform."""
 
     hub: Hubspace = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        HubspaceSwitch(hubspaceDevice=device)
-        for deviceId, device in hub.switches.items()
-    )
+    async_add_entities(HubspaceSwitch(hubspaceDevice=device) for device in hub.switches)
 
 
 class HubspaceSwitch(SwitchEntity):
@@ -37,13 +34,7 @@ class HubspaceSwitch(SwitchEntity):
     def __init__(self, hubspaceDevice: HubspaceRawDevice) -> None:
         super().__init__()
         self._hubspace_device = hubspaceDevice
-        outletId = (
-            ""
-            if self._hubspace_device.outletIndex is None
-            else f"_{self._hubspace_device.outletIndex}"
-        )
-
-        self._attr_unique_id = f"{self._hubspace_device.id}{outletId}"
+        self._attr_unique_id = self._hubspace_device.unique_id
 
         self._attr_device_class = (
             SwitchDeviceClass.OUTLET
@@ -53,10 +44,10 @@ class HubspaceSwitch(SwitchEntity):
 
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (DOMAIN, f"{self._hubspace_device.id}"),
+                (DOMAIN, self._hubspace_device.id),
             },
-            name=f"{self._hubspace_device.friendlyName}",
-            manufacturer="Hubspace",
+            name=self._hubspace_device.friendlyName,
+            manufacturer=self._hubspace_device.manufacturer,
             model=self._hubspace_device.model,
         )
 

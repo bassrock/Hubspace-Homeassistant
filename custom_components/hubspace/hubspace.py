@@ -27,13 +27,15 @@ class HubspaceRawDevice:
     functions: list[dict[str, any]]
     state: list[dict[str, any]]
     outletIndex: Optional[int]
-    children: list["HubspaceRawDevice"] = []
+    unique_id: str
+    manufacturer: str
 
     def __init__(
         self,
         id: str,
         deviceId: str,
         model: str,
+        manufacturer: str,
         deviceClass: str,
         friendlyName: str,
         functions: list[dict[str, any]],
@@ -44,14 +46,12 @@ class HubspaceRawDevice:
         self.deviceId = deviceId
         self.model = model
         self.deviceClass = deviceClass
-        self.friendlyName = friendlyName
         self.functions = functions
         self.state = state
         self.outletIndex = outletIndex
-        self
-
-    def addChild(self, device: "HubspaceRawDevice"):
-        self.children.append(device)
+        self.unique_id = f"{self.id}{'' if outletIndex is None else f'_{outletIndex}'}"
+        self.friendlyName = friendlyName
+        self.manufacturer = manufacturer
 
 
 class Hubspace:
@@ -66,11 +66,8 @@ class Hubspace:
     # Token lasts 120 seconds
     _token_duration = 118 * 1000
 
-    # all the devices returned from the metadata array
-    _raw_devices = []
-
     # all the devices categorized with children under them
-    _devices: dict[str, HubspaceRawDevice] = {}
+    _devices: list[HubspaceRawDevice] = []
 
     def __init__(self, username, password) -> None:
         """Init the hubspace hub."""
@@ -257,39 +254,15 @@ class Hubspace:
 
         results = response.json()
 
-        _devices: dict[str, HubspaceRawDevice] = {}
-
-        # do 1 loop to get all the devices that have childen
-        for lis in results:
-            if (
-                lis.get("typeId") == "metadevice.device"
-                and len(lis.get("children", [])) != 0
-            ):
-                device = HubspaceRawDevice(
-                    id=lis.get("id"),
-                    deviceId=lis.get("deviceId"),
-                    deviceClass=lis.get("description", {})
-                    .get("device", {})
-                    .get("deviceClass"),
-                    model=lis.get("description", {}).get("device", {}).get("model"),
-                    friendlyName=lis.get("friendlyName"),
-                    functions=lis.get("description", {}).get("functions", []),
-                    state=lis.get("state", {}).get("values", []),
-                )
-                _devices[device.deviceId] = device
+        _devices: list[HubspaceRawDevice] = []
 
         # loop again to get all the devices that do no have childen.
         for lis in results:
-            if (
-                lis.get("typeId") == "metadevice.device"
-                and len(lis.get("children", [])) == 0
-            ):
+            if lis.get("typeId") == "metadevice.device":
                 deviceClass = (
                     lis.get("description", {}).get("device", {}).get("deviceClass")
                 )
                 functions = lis.get("description", {}).get("functions", [])
-                deviceId = lis.get("deviceId")
-                device = None
 
                 # Some extra work because outlets are 2 seperate entities, but 1 device.
                 if deviceClass == "power-outlet":
@@ -309,51 +282,48 @@ class Hubspace:
                                     model=lis.get("description", {})
                                     .get("device", {})
                                     .get("model"),
+                                    manufacturer=lis.get("description", {})
+                                    .get("device", {})
+                                    .get("manufacturerName"),
                                     friendlyName=lis.get("friendlyName"),
                                     functions=functions,
                                     state=lis.get("state", {}).get("values", []),
                                     outletIndex=outletIndex,
                                 )
-                                deviceId = f"{device.deviceId}_{outletIndex}"
-                                _devices[deviceId] = device
+                                _devices.append(device)
                             except IndexError:
                                 _LOGGER.debug("Error extracting outlet index")
                 else:
                     device = HubspaceRawDevice(
                         id=lis.get("id"),
-                        deviceId=deviceId,
+                        deviceId=lis.get("deviceId"),
                         deviceClass=deviceClass,
                         model=lis.get("description", {}).get("device", {}).get("model"),
+                        manufacturer=lis.get("description", {})
+                        .get("device", {})
+                        .get("manufacturerName"),
                         friendlyName=lis.get("friendlyName"),
                         functions=functions,
                         state=lis.get("state", {}).get("values", []),
                     )
-                    if deviceId in _devices:
-                        _devices[deviceId].addChild(device=device)
-                    else:
-                        _devices[deviceId] = device
+                    _devices.append(device)
+
         self._devices = _devices
 
     @property
-    def lights(self) -> dict[str, HubspaceRawDevice]:
-        return {
-            key: value
-            for key, value in self._devices.items()
-            if value.deviceClass == "light"
-        }
+    def lights(self) -> list[HubspaceRawDevice]:
+        return [device for device in self._devices if device.deviceClass == "light"]
 
     @property
-    def ceilingFans(self) -> dict[str, HubspaceRawDevice]:
-        return {
-            key: value
-            for key, value in self._devices.items()
-            if value.deviceClass == "ceiling-fan"
-        }
+    def ceilingFans(self) -> list[HubspaceRawDevice]:
+        return [
+            device for device in self._devices if device.deviceClass == "ceiling-fan"
+        ]
 
     @property
-    def switches(self) -> dict[str, HubspaceRawDevice]:
-        return {
-            key: value
-            for key, value in self._devices.items()
-            if value.deviceClass in ("switch", "power-outlet")
-        }
+    def switches(self) -> list[HubspaceRawDevice]:
+        return [
+            device
+            for device in self._devices
+            if device.deviceClass in ("switch", "power-outlet")
+        ]

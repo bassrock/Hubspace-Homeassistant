@@ -3,5 +3,3 @@
 DOMAIN = "hubspace"
 
 TIMEOUT = 30
-
-DEVICE_ID = "device-id"

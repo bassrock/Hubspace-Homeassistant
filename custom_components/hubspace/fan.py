@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.light import LightEntity
+from homeassistant.components.fan import FanEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -23,11 +23,11 @@ async def async_setup_entry(
     """Set up the light platform."""
 
     hub: Hubspace = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(HubspaceLight(hubspaceDevice=device) for device in hub.lights)
+    async_add_entities(HubspaceFan(hubspaceDevice=device) for device in hub.lights)
 
 
-class HubspaceLight(LightEntity):
-    """A hubspace light."""
+class HubspaceFan(FanEntity):
+    """A hubspace fan."""
 
     _hubspace_device: HubspaceRawDevice
 
