@@ -5,12 +5,13 @@ import logging
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .base import HubspaceEntity
 from .const import DOMAIN
-from .hubspace import Hubspace, HubspaceRawDevice
+from .hubspace_coordinator import HubspaceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,36 +21,45 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the fan platform."""
+    """Set up the switch platform."""
 
-    hub: Hubspace = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(HubspaceSwitch(hubspaceDevice=device) for device in hub.switches)
+    coordinator: HubspaceCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities(
+        HubspaceSwitch(idx=deviceId, coordinator=coordinator)
+        for deviceId in coordinator.switches
+    )
 
 
-class HubspaceSwitch(SwitchEntity):
+class HubspaceSwitch(SwitchEntity, HubspaceEntity):
     """A hubspace switch/outlet."""
 
-    _hubspace_device: HubspaceRawDevice
-
-    def __init__(self, hubspaceDevice: HubspaceRawDevice) -> None:
-        super().__init__()
-        self._hubspace_device = hubspaceDevice
-        self._attr_unique_id = self._hubspace_device.unique_id
-
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self.hubspace_device = self.coordinator.data[self._idx]
         self._attr_device_class = (
             SwitchDeviceClass.OUTLET
-            if self._hubspace_device.deviceClass == "power-outlet"
+            if self.hubspace_device.deviceClass == "power-outlet"
             else SwitchDeviceClass.SWITCH
         )
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (DOMAIN, self._hubspace_device.id),
-            },
-            name=self._hubspace_device.friendlyName,
-            manufacturer=self._hubspace_device.manufacturer,
-            model=self._hubspace_device.model,
-        )
+        if self.hubspace_device.outletIndex is not None:
+            self._attr_is_on = (
+                self.hubspace_device.stateValue(
+                    functionClass="toggle",
+                    functionInstance=f"outlet-{self.hubspace_device.outletIndex}",
+                )
+                == "on"
+            )
+        else:
+            self._attr_is_on = (
+                self.hubspace_device.stateValue(functionClass="power") == "on"
+            )
+
+        try:
+            self.async_write_ha_state()
+        except:
+            _LOGGER.debug("could not write ha state, likely init")
 
     def turn_on(self) -> None:
         """Turn the entity on."""

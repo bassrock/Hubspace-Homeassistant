@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.light import LightEntity
+from homeassistant.components.light import ColorMode, LightEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .base import HubspaceEntity
 from .const import DOMAIN
-from .hubspace import Hubspace, HubspaceRawDevice
+from .hubspace_coordinator import HubspaceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,28 +22,45 @@ async def async_setup_entry(
 ) -> None:
     """Set up the light platform."""
 
-    hub: Hubspace = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(HubspaceLight(hubspaceDevice=device) for device in hub.lights)
+    coordinator: HubspaceCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities(
+        HubspaceLight(idx=deviceId, coordinator=coordinator)
+        for deviceId in coordinator.lights
+    )
 
 
-class HubspaceLight(LightEntity):
+class HubspaceLight(LightEntity, HubspaceEntity):
     """A hubspace light."""
 
-    _hubspace_device: HubspaceRawDevice
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self.hubspace_device = self.coordinator.data[self._idx]
 
-    def __init__(self, hubspaceDevice: HubspaceRawDevice) -> None:
-        super().__init__()
-        self._hubspace_device = hubspaceDevice
-        self._attr_unique_id = self._hubspace_device.unique_id
-
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (DOMAIN, self._hubspace_device.id),
-            },
-            name=self._hubspace_device.friendlyName,
-            manufacturer=self._hubspace_device.manufacturer,
-            model=self._hubspace_device.model,
+        ## TODO: Create this based on the data, including the supported color temps
+        self._attr_supported_color_modes = [
+            ColorMode.COLOR_TEMP,
+        ]
+        self._attr_is_on = (
+            self.hubspace_device.stateValue(
+                functionClass="power", functionInstance="light-power"
+            )
+            == "on"
         )
+
+        self._attr_brightness = self.hubspace_device.stateValue(
+            functionClass="brightness"
+        )
+
+        # 3700K as an expample
+        self._attr_color_temp_kelvin = self.hubspace_device.stateValue(
+            functionClass="color-temperature"
+        )[:-1]
+
+        try:
+            self.async_write_ha_state()
+        except:
+            _LOGGER.debug("could not write ha state, likely init")
 
     def turn_on(self) -> None:
         """Turn the entity on."""

@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .hubspace import Hubspace
+from .hubspace_coordinator import HubspaceCoordinator
 
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.FAN, Platform.LIGHT]
 
@@ -19,8 +20,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     authed = await hass.async_add_executor_job(hub.authenticate)
     if not authed:
         return False
-    await hass.async_add_executor_job(hub.discoverDeviceIds)
-    hass.data[DOMAIN][entry.entry_id] = hub
+    coordinator = HubspaceCoordinator(hass, hubspace=hub)
+
+    hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    await coordinator.async_config_entry_first_refresh()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

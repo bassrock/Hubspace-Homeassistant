@@ -53,6 +53,50 @@ class HubspaceRawDevice:
         self.friendlyName = friendlyName
         self.manufacturer = manufacturer
 
+    def stateValue(
+        self, functionClass: str, functionInstance: Optional[str] = None
+    ) -> any:
+        return next(
+            (
+                dictionary["value"]
+                for dictionary in self.state
+                if dictionary["functionClass"] == functionClass
+                and (
+                    functionInstance is None
+                    or dictionary["functionInstance"] == functionInstance
+                )
+            ),
+            None,
+        )
+
+    def function(
+        self, functionClass: str, functionInstance: Optional[str] = None
+    ) -> dict[str, any]:
+        return next(
+            (
+                dictionary
+                for dictionary in self.functions
+                if dictionary["functionClass"] == functionClass
+                and (
+                    functionInstance is None
+                    or dictionary["functionInstance"] == functionInstance
+                )
+            ),
+            None,
+        )
+
+    def functionValues(
+        self, functionClass: str, functionInstance: Optional[str] = None
+    ) -> list[str]:
+        function = self.function(
+            functionClass=functionClass, functionInstance=functionInstance
+        )
+        optionNames = []
+        for valueOption in function["values"]:
+            optionNames.append(valueOption["name"])
+        optionNames.sort()
+        return optionNames
+
 
 class Hubspace:
     """Class to test interaction with Hubspace."""
@@ -65,9 +109,6 @@ class Hubspace:
     _last_token_time = None
     # Token lasts 120 seconds
     _token_duration = 118 * 1000
-
-    # all the devices categorized with children under them
-    _devices: list[HubspaceRawDevice] = []
 
     def __init__(self, username, password) -> None:
         """Init the hubspace hub."""
@@ -249,12 +290,12 @@ class Hubspace:
 
         return r
 
-    def discoverDeviceIds(self):
+    def pullData(self) -> list[HubspaceRawDevice]:
         response = self.getMetadeviceInfo()
 
         results = response.json()
 
-        _devices: list[HubspaceRawDevice] = []
+        _devices: dict[str, HubspaceRawDevice] = {}
 
         # loop again to get all the devices that do no have childen.
         for lis in results:
@@ -290,7 +331,7 @@ class Hubspace:
                                     state=lis.get("state", {}).get("values", []),
                                     outletIndex=outletIndex,
                                 )
-                                _devices.append(device)
+                                _devices[device.unique_id] = device
                             except IndexError:
                                 _LOGGER.debug("Error extracting outlet index")
                 else:
@@ -306,24 +347,5 @@ class Hubspace:
                         functions=functions,
                         state=lis.get("state", {}).get("values", []),
                     )
-                    _devices.append(device)
-
-        self._devices = _devices
-
-    @property
-    def lights(self) -> list[HubspaceRawDevice]:
-        return [device for device in self._devices if device.deviceClass == "light"]
-
-    @property
-    def ceilingFans(self) -> list[HubspaceRawDevice]:
-        return [
-            device for device in self._devices if device.deviceClass == "ceiling-fan"
-        ]
-
-    @property
-    def switches(self) -> list[HubspaceRawDevice]:
-        return [
-            device
-            for device in self._devices
-            if device.deviceClass in ("switch", "power-outlet")
-        ]
+                    _devices[device.unique_id] = device
+        return _devices
