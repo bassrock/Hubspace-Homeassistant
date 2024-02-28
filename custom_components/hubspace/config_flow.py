@@ -13,7 +13,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .hubspace import Hubspace
+from .hubspace_client import HubspaceClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
-    hub = Hubspace(data[CONF_USERNAME], data[CONF_PASSWORD])
+    hub = HubspaceClient(data[CONF_USERNAME], data[CONF_PASSWORD])
 
     authed = await hass.async_add_executor_job(hub.authenticate)
 

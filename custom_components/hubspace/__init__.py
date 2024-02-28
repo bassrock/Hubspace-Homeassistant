@@ -6,21 +6,23 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .hubspace import Hubspace
+from .hubspace_client import HubspaceClient
 from .hubspace_coordinator import HubspaceCoordinator
 
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.FAN, Platform.LIGHT]
+PLATFORMS: list[Platform] = [Platform.FAN]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Hubspace from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
-    hub = Hubspace(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
-    authed = await hass.async_add_executor_job(hub.authenticate)
+    hubspace_client = HubspaceClient(
+        entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD]
+    )
+    authed = await hass.async_add_executor_job(hubspace_client.authenticate)
     if not authed:
         return False
-    coordinator = HubspaceCoordinator(hass, hubspace=hub)
+    coordinator = HubspaceCoordinator(hass, hubspace_client=hubspace_client)
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
