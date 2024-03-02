@@ -26,7 +26,7 @@ class HubspaceCoordinator(DataUpdateCoordinator):
             # Name of the data. For logging purposes.
             name="Hubspace Coordinator",
             # Polling interval. Will only be polled if there are subscribers.
-            update_interval=timedelta(seconds=5),
+            update_interval=timedelta(seconds=30),
         )
         self.hubspace_client = hubspace_client
         self.hass = hass
@@ -71,5 +71,5 @@ class HubspaceCoordinator(DataUpdateCoordinator):
             deviceId
             for [deviceId, device] in self.data.items()
             if device.get("description", {}).get("device", {}).get("deviceClass", None)
-            in ("switch", "power-outlet")
+            in ("switch")  # , "power-outlet
         ]

@@ -10,22 +10,8 @@ from typing import Any
 
 import requests
 
-from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
-
-from .const import (
-    DOMAIN,
-    FUNCTION_CLASS,
-    FUNCTION_INSTANCE,
-    SETTABLE_FUNCTION_CLASSES,
-    TIMEOUT,
-    FunctionClass,
-    FunctionInstance,
-    FunctionKey,
-)
+from .const import SETTABLE_FUNCTION_CLASSES, TIMEOUT, FunctionClass, FunctionInstance
+from .hubspace_base import HubspaceStateValue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -233,323 +219,78 @@ class HubspaceClient:
                     lis.get("description", {}).get("device", {}).get("deviceClass")
                 )
                 functions = lis.get("description", {}).get("functions", [])
-                ## TODO re-add code to make outlet switch work..
+                # TODO re-add code to make outlet switch work..
                 indexed_devices[device_id] = lis
         return indexed_devices
 
-
-class HubspaceObject:
-    """Base Hubspace Object which stores data in the form of a dictionary from the Hubspace API response."""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        self._data = data
-
-
-class HubspaceIdentifiableObject(HubspaceObject):
-    """A Hubspace object which can be identified by a unique id."""
-
-    @property
-    def id(self) -> str | None:
-        """Identifier for this object."""
-        return self._data.get("id", None)
-
-    @property
-    def device_id(self) -> str | None:
-        return self._data.get("deviceId", None)
-
-    @property
-    def name(self) -> str | None:
-        return self._data.get("friendlyName", None)
-
-    @property
-    def model(self) -> str | None:
-        return self._data.get("description", {}).get("device", {}).get("model", None)
-
-    @property
-    def manufacturer(self) -> str | None:
-        return (
-            self._data.get("description", {})
-            .get("device", {})
-            .get("manufacturerName", None)
+    def set_state(self, metadeviceId: str, values: list[dict[str, Any]]) -> None:
+        """Sets the devices current state."""
+        auth_token = self.get_auth_token()
+        date = datetime.datetime.now(tz=datetime.UTC)
+        utc_time = calendar.timegm(date.utctimetuple()) * 1000
+        state_payload = {
+            "metadeviceId": metadeviceId,
+            "values": [value | {"lastUpdateTime": utc_time} for value in values],
+        }
+        state_url = (
+            f"{AFERO_API}/accounts/{self._account_id}/metadevices/{metadeviceId}/state"
         )
-
-
-class HubspaceFunctionKeyedObject(HubspaceObject):
-    """A Hubspace object which has a function class."""
-
-    @property
-    def function_class(self) -> FunctionClass:
-        """Identifier for this objects's function class."""
-        return self._data.get(FUNCTION_CLASS, FunctionClass.UNSUPPORTED)
-
-    @property
-    def function_instance(self) -> str | None:
-        """Identifier for this objects's function instance."""
-        return self._data.get(FUNCTION_INSTANCE, None)
-
-
-class HubspaceFunction(HubspaceFunctionKeyedObject, HubspaceIdentifiableObject):
-    """A Hubspace object which defines a function and its possible values."""
-
-    _values: list[Any] | None = None
-
-    @property
-    def type(self) -> str | None:
-        return self._data.get("type", None)
-
-    @property
-    def values(self) -> list[Any]:
-        if not self._values:
-            self._values = [value.get("name") for value in self._data.get("values", [])]
-            self._values.sort(key=self._value_key)
-        return self._values
-
-    def _value_key(self, value: Any) -> Any:
-        return value
-
-
-class HubspaceStateValue(HubspaceFunctionKeyedObject):
-    """A Hubspace object which defines a particular state value."""
-
-    def hass_value(self) -> Any | None:
-        hubspace_value = self.hubspace_value()
-        if self.function_class == FunctionClass.AVAILABLE:
-            return bool(hubspace_value)
-        return hubspace_value
-
-    def set_hass_value(self, value):
-        if self.function_class == FunctionClass.AVAILABLE:
-            self.set_hubspace_value(str(value))
-        else:
-            self.set_hubspace_value(value)
-
-    def hubspace_value(self) -> Any | None:
-        return self._data.get("value")
-
-    def set_hubspace_value(self, value):
-        self._data["value"] = value
-
-    @property
-    def last_update_time(self) -> int | None:
-        return self._data.get("lastUpdateTime")
-
-
-class HubspaceEntity(CoordinatorEntity, HubspaceIdentifiableObject):
-    """A Hubspace Home assistant entity."""
-
-    _function_class: HubspaceFunction = HubspaceFunction
-    _state_value_class: HubspaceStateValue = HubspaceStateValue
-    _functions: dict[
-        FunctionClass, dict[FunctionInstance | None, HubspaceFunction]
-    ] | None = None
-    _states: dict[
-        FunctionClass, dict[FunctionInstance | None, _state_value_class]
-    ] | None = None
-
-    def __init__(self, idx: str, coordinator: DataUpdateCoordinator) -> None:
-        super().__init__(coordinator=coordinator, context=idx)
-        self._idx = idx
-        self._data = coordinator.data[self._idx]
-        self._coordinator = coordinator
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={
-                (DOMAIN, self.device_id),
-            },
-            name=self.name,
-            manufacturer=self.manufacturer,
-            model=self.model,
+        state_header = {
+            "user-agent": USER_AGENT,
+            "host": AFERO_SEMANTICS_HOST,
+            "accept-encoding": "gzip",
+            "authorization": f"Bearer {auth_token}",
+            "content-type": "application/json; charset=utf-8",
+        }
+        state_response = requests.put(
+            state_url, json=state_payload, headers=state_header, timeout=TIMEOUT
         )
+        state_response.close()
+        # TODO: set state
+        state_response.json()
 
-    @property
-    def unique_id(self) -> str | None:
-        """Return a unique ID."""
-        return self.id
-
-    @property
-    def name(self) -> str | None:
-        """Return the display name of this device."""
-        return self._data.get("friendlyName")
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return self._get_state_value(FunctionClass.AVAILABLE, default=True)
-
-    @property
-    def functions(
+    def push_state(
         self,
-    ) -> dict[FunctionClass, dict[FunctionInstance | None, HubspaceFunction]] | None:
-        """Return the functions available for this device."""
-        if not self._functions:
-            self._functions = {}
-            for function in self._data.get("description", {}).get("functions", []):
-                hubspace_function = self._function_class(function)
-                if hubspace_function.function_class not in self._functions:
-                    self._functions[hubspace_function.function_class] = {}
-                self._functions[hubspace_function.function_class][
-                    hubspace_function.function_instance
-                ] = hubspace_function
-        return self._functions
-
-    @property
-    def states(
-        self,
-    ) -> dict[FunctionClass, dict[FunctionInstance | None, HubspaceStateValue]]:
-        """Return the current states of this device."""
-        if not self._states:
-            self._set_state(self._data.get("state"))
-        return self._states
-
-    # def update(self) -> None:
-    #     """Update this devices current state."""
-    #     if self._skip_next_update:
-    #         self._skip_next_update = False
-    #         return
-    #     auth_token = get_auth_token(self._refresh_token)
-    #     state_url = (
-    #         f"{AFERO_API}/accounts/{self._account_id}/metadevices/{self.id}/state"
-    #     )
-    #     state_header = {
-    #         "user-agent": USER_AGENT,
-    #         "host": AFERO_SEMANTICS_HOST,
-    #         "accept-encoding": "gzip",
-    #         "authorization": f"Bearer {auth_token}",
-    #     }
-    #     state_response = requests.get(state_url, headers=state_header)
-    #     state_response.close()
-    #     self._set_state(state_response.json())
-
-    # def set_state(self, values: list[dict[str, Any]]) -> None:
-    #     """Sets the devices current state."""
-    #     auth_token = get_auth_token(self._refresh_token)
-    #     date = datetime.datetime.now(tz=datetime.utc)
-    #     utc_time = calendar.timegm(date.utctimetuple()) * 1000
-    #     state_payload = {
-    #         "metadeviceId": self.id,
-    #         "values": [value | {"lastUpdateTime": utc_time} for value in values],
-    #     }
-    #     state_url = (
-    #         f"{AFERO_API}/accounts/{self._account_id}/metadevices/{self.id}/state"
-    #     )
-    #     state_header = {
-    #         "user-agent": USER_AGENT,
-    #         "host": AFERO_SEMANTICS_HOST,
-    #         "accept-encoding": "gzip",
-    #         "authorization": f"Bearer {auth_token}",
-    #         "content-type": "application/json; charset=utf-8",
-    #     }
-    #     state_response = requests.put(
-    #         state_url, json=state_payload, headers=state_header, timeout=TIMEOUT
-    #     )
-    #     state_response.close()
-    #     self._set_state(state_response.json())
-    #     self._skip_next_update = True
-
-    # def _push_state(self):
-    #     """Pushes the devices current state."""
-    #     auth_token = get_auth_token(self._refresh_token)
-    #     date = datetime.datetime.now(tz=datetime.utc)
-    #     utc_time = calendar.timegm(date.utctimetuple()) * 1000
-    #     states = [state for states in self.states.values() for state in states.values()]
-    #     state_payload = {
-    #         "metadeviceId": self.id,
-    #         "values": [
-    #             {
-    #                 "functionClass": state.function_class,
-    #                 "value": state.hubspace_value(),
-    #                 "lastUpdateTime": utc_time,
-    #             }
-    #             | (
-    #                 {"functionInstance": state.function_instance}
-    #                 if state.function_instance
-    #                 else {}
-    #             )
-    #             for state in states
-    #             if state.hubspace_value() is not None
-    #             and state.function_class in SETTABLE_FUNCTION_CLASSES
-    #         ],
-    #     }
-    #     state_url = (
-    #         f"{AFERO_API}/accounts/{self._account_id}/metadevices/{self.id}/state"
-    #     )
-    #     state_header = {
-    #         "user-agent": USER_AGENT,
-    #         "host": AFERO_SEMANTICS_HOST,
-    #         "accept-encoding": "gzip",
-    #         "authorization": f"Bearer {auth_token}",
-    #         "content-type": "application/json; charset=utf-8",
-    #     }
-    #     state_response = requests.put(
-    #         state_url, json=state_payload, headers=state_header, timeout=TIMEOUT
-    #     )
-    #     state_response.close()
-    #     _LOGGER.debug("State payload %s", state_payload)
-    #     _LOGGER.debug("State response %s", state_response.json())
-    #     self._set_state(state_response.json())
-    #     self._skip_next_update = True
-
-    def _set_state_value(self, key: FunctionKey, value: Any) -> None:
-        states = []
-        if isinstance(key, tuple):
-            state = self.states.get(key[0], {}).get(key[1])
-            if state:
-                states.append(state)
-        else:
-            states.extend(self.states.get(key, {}).values())
-        for state in states:
-            state.set_hass_value(value)
-
-    def _set_state(self, state: dict[str, Any] or None) -> None:
-        if state:
-            self._states = {}
-            for value in state.get("values", []):
-                hubspace_state_value = self._state_value_class(value)
-                if hubspace_state_value.function_class != FunctionClass.UNSUPPORTED:
-                    if hubspace_state_value.function_class not in self._states:
-                        self._states[hubspace_state_value.function_class] = {}
-                    self._states[hubspace_state_value.function_class][
-                        hubspace_state_value.function_instance
-                    ] = hubspace_state_value
-
-    def _get_state_value(self, key: FunctionKey, default: Any = None) -> Any:
-        [function_class, function_instance] = (
-            key if isinstance(key, tuple) else (key, None)
+        metadeviceId: str,
+        states: dict[FunctionClass, dict[FunctionInstance | None, HubspaceStateValue]],
+    ):
+        """Pushes the devices current state."""
+        auth_token = self.get_auth_token()
+        date = datetime.datetime.now(tz=datetime.UTC)
+        utc_time = calendar.timegm(date.utctimetuple()) * 1000
+        states = [state for states in states.values() for state in states.values()]
+        state_payload = {
+            "metadeviceId": metadeviceId,
+            "values": [
+                {
+                    "functionClass": state.function_class,
+                    "value": state.hubspace_value(),
+                    "lastUpdateTime": utc_time,
+                }
+                | (
+                    {"functionInstance": state.function_instance}
+                    if state.function_instance
+                    else {}
+                )
+                for state in states
+                if state.hubspace_value() is not None
+                and state.function_class in SETTABLE_FUNCTION_CLASSES
+            ],
+        }
+        state_url = (
+            f"{AFERO_API}/accounts/{self._account_id}/metadevices/{metadeviceId}/state"
         )
-        state_value = None
-        if isinstance(key, tuple):
-            state_value = self.states.get(function_class, {}).get(function_instance)
-        else:
-            state_values = list(self.states.get(function_class, {}).values())
-            if len(state_values) > 0:
-                state_value = state_values[0]
-                if len(state_values) > 1:
-                    _LOGGER.warning(
-                        "Only expected at most one function of this FunctionClass.%s. Attempting to use first",
-                        function_class,
-                    )
-        if state_value:
-            return state_value.hass_value()
-        return default
-
-    def _get_function_values(self, key: FunctionKey, default: Any = None) -> Any:
-        [function_class, function_instance] = (
-            key if isinstance(key, tuple) else (key, None)
+        state_header = {
+            "user-agent": USER_AGENT,
+            "host": AFERO_SEMANTICS_HOST,
+            "accept-encoding": "gzip",
+            "authorization": f"Bearer {auth_token}",
+            "content-type": "application/json; charset=utf-8",
+        }
+        state_response = requests.put(
+            state_url, json=state_payload, headers=state_header, timeout=TIMEOUT
         )
-        function = None
-        if isinstance(key, tuple):
-            function = self.functions.get(function_class, {}).get(function_instance)
-        else:
-            functions = list(self.functions.get(function_class, {}).values())
-            if len(functions) > 0:
-                function = functions[0]
-                if len(functions) > 1:
-                    _LOGGER.warning(
-                        "Only expected at most one function of this FunctionClass.%s. Attempting to use first",
-                        function_class,
-                    )
-        if function:
-            return function.values
-        return default
+        state_response.close()
+        _LOGGER.debug("State payload %s", state_payload)
+        _LOGGER.debug("State response %s", state_response.json())
+        return state_response.json()

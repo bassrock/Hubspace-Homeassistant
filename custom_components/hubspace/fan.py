@@ -15,8 +15,9 @@ from homeassistant.util.percentage import (
 )
 
 from .const import DOMAIN, TOGGLE_DISABLED, TOGGLE_ENABLED, FunctionClass
-from .hubspace_client import HubspaceEntity, HubspaceFunction
+from .hubspace_base import HubspaceFunction
 from .hubspace_coordinator import HubspaceCoordinator
+from .hubspace_entity import HubspaceEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -143,8 +144,8 @@ class HubspaceFan(FanEntity, HubspaceEntity):
 
     def turn_on(
         self,
-        percentage: int or None = None,
-        preset_mode: str or None = None,
+        percentage: int | None = None,
+        preset_mode: str | None = None,
         **kwargs,
     ) -> None:
         """Instruct the light to turn on."""
