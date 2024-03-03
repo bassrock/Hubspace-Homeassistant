@@ -55,6 +55,11 @@ class HubspaceEntity(CoordinatorEntity, HubspaceIdentifiableObject):
         return self.id
 
     @property
+    def name(self) -> str or None:
+        """Return the display name of this device."""
+        return self._data.get("friendlyName")
+
+    @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._get_state_value(FunctionClass.AVAILABLE, default=True)
