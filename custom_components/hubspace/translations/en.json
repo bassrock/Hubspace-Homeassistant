@@ -1,23 +1,21 @@
 {
-  "title": "Hubspace",
-  "services": {
-    "send_command": {
-      "name": "Send Command",
-      "description": "Sends a custom hubspace API command.",
-      "fields": {
-        "value": {
-          "name": "Value",
-          "description": "The value you want to send"
+    "config": {
+        "abort": {
+            "already_configured": "Device is already configured"
         },
-        "function_class": {
-          "name": "Function Class",
-          "description": "functionClass you want to send"
+        "error": {
+            "cannot_connect": "Failed to connect",
+            "invalid_auth": "Invalid authentication",
+            "unknown": "Unexpected error"
         },
-         "function_instance": {
-          "name": "Function Instance",
-          "description": "functionInstance you want to send"
+        "step": {
+            "user": {
+                "data": {
+                    "host": "Host",
+                    "password": "Password",
+                    "username": "Username"
+                }
+            }
         }
-      }
     }
-  }
 }

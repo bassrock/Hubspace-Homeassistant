@@ -1,11 +1,17 @@
 {
   "domain": "hubspace",
-  "name": "hubspace",
-  "codeowners": ["@jdeath"],
+  "name": "Hubspace",
+  "codeowners": [
+    "@bassrock"
+  ],
+  "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/jdeath/Hubspace-Homeassistant/blob/main/README.md",
+  "documentation": "https://github.com/bassrock/Hubspace-Homeassistant/blob/main/README.md",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/jdeath/Hubspace-Homeassistant/issues",
+  "issue_tracker": "https://github.com/bassrock/Hubspace-Homeassistant/issues",
+  "homekit": {},
   "requirements": [],
-  "version": "1.0"
+  "ssdp": [],
+  "zeroconf": [],
+  "version": "3.00"
 }
