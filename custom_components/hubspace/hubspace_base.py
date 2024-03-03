@@ -4,7 +4,7 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
-from .const import FUNCTION_CLASS, FUNCTION_INSTANCE, FunctionClass
+from .const import FUNCTION_CLASS, FUNCTION_INSTANCE, FunctionClass, FunctionInstance
 
 
 class HubspaceObject:
@@ -12,6 +12,10 @@ class HubspaceObject:
 
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
+
+    @property
+    def raw_data(self) -> dict[str, Any]:
+        return self._data
 
 
 class HubspaceIdentifiableObject(HubspaceObject):
@@ -40,6 +44,12 @@ class HubspaceIdentifiableObject(HubspaceObject):
             self._data.get("description", {})
             .get("device", {})
             .get("manufacturerName", None)
+        )
+
+    @property
+    def hubspace_device_class(self) -> str | None:
+        return (
+            self._data.get("description", {}).get("device", {}).get("deviceClass", None)
         )
 
 

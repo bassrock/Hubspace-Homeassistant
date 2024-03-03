@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -27,11 +27,15 @@ class HubspaceEntity(CoordinatorEntity, HubspaceIdentifiableObject):
     _states: dict[
         FunctionClass, dict[FunctionInstance | None, _state_value_class]
     ] | None = None
+    _index: Optional[int] = None
 
-    def __init__(self, idx: str, coordinator: HubspaceCoordinator) -> None:
+    def __init__(
+        self, idx: str, coordinator: HubspaceCoordinator, index: Optional[int] = None
+    ) -> None:
         super().__init__(coordinator=coordinator, context=idx)
         self._idx = idx
         self._data = coordinator.data[self._idx]
+        self._index = index
         self._coordinator = coordinator
 
     @property
@@ -49,11 +53,6 @@ class HubspaceEntity(CoordinatorEntity, HubspaceIdentifiableObject):
     def unique_id(self) -> str | None:
         """Return a unique ID."""
         return self.id
-
-    @property
-    def name(self) -> str | None:
-        """Return the display name of this device."""
-        return self._data.get("friendlyName")
 
     @property
     def available(self) -> bool:
@@ -84,6 +83,9 @@ class HubspaceEntity(CoordinatorEntity, HubspaceIdentifiableObject):
         if not self._states:
             self._set_state(self._data.get("state"))
         return self._states
+
+    def force_load_state_from_data(self):
+        self._set_state(self._data.get("state"))
 
     def _set_state_value(self, key: FunctionKey, value: Any) -> None:
         states = []

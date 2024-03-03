@@ -80,6 +80,7 @@ class HubspaceLight(LightEntity, HubspaceEntity):
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         self._data = self.coordinator.data[self._idx]
+        self.force_load_state_from_data()
         super()._handle_coordinator_update()
 
     _function_class = HubspaceLightFunction

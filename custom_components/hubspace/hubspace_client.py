@@ -11,7 +11,7 @@ from typing import Any
 import requests
 
 from .const import SETTABLE_FUNCTION_CLASSES, TIMEOUT, FunctionClass, FunctionInstance
-from .hubspace_base import HubspaceStateValue
+from .hubspace_base import HubspaceIdentifiableObject, HubspaceStateValue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -206,21 +206,14 @@ class HubspaceClient:
 
         return children_response.json()
 
-    def pull_coordinator_data(self):
+    def pull_coordinator_data(self) -> dict[str, dict[str, any]]:
         results = self.get_devices()
+        indexed_devices: dict[str, dict[str, any]] = {}
 
-        indexed_devices = {}
-
-        # loop again to get all the devices that do no have childen.
         for lis in results:
             if lis.get("typeId") == "metadevice.device":
-                device_id = lis.get("id")
-                device_class = (
-                    lis.get("description", {}).get("device", {}).get("deviceClass")
-                )
-                functions = lis.get("description", {}).get("functions", [])
-                # TODO re-add code to make outlet switch work..
-                indexed_devices[device_id] = lis
+                indexed_devices[lis.get("id")] = lis
+
         return indexed_devices
 
     def set_state(self, metadeviceId: str, values: list[dict[str, Any]]) -> None:

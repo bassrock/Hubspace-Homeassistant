@@ -71,5 +71,5 @@ class HubspaceCoordinator(DataUpdateCoordinator):
             deviceId
             for [deviceId, device] in self.data.items()
             if device.get("description", {}).get("device", {}).get("deviceClass", None)
-            in ("switch")  # , "power-outlet
+            in ("switch", "power-outlet")
         ]

@@ -9,7 +9,7 @@ from .const import DOMAIN
 from .hubspace_client import HubspaceClient
 from .hubspace_coordinator import HubspaceCoordinator
 
-PLATFORMS: list[Platform] = [Platform.FAN, Platform.LIGHT]
+PLATFORMS: list[Platform] = [Platform.FAN, Platform.LIGHT, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
