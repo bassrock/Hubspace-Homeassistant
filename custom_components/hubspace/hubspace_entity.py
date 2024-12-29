@@ -161,7 +161,7 @@ class HubspaceEntity(CoordinatorEntity, HubspaceIdentifiableObject):
                 metadeviceId=self.id, values=values
             )
         )
-        self.async_write_ha_state()
+        self.schedule_update_ha_state()
 
     def _push_state(
         self,
@@ -171,4 +171,4 @@ class HubspaceEntity(CoordinatorEntity, HubspaceIdentifiableObject):
                 metadeviceId=self.id, states=self.states
             )
         )
-        self.async_write_ha_state()
+        self.schedule_update_ha_state()
