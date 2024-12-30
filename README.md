@@ -1,3 +1,6 @@
+Use https://github.com/jdeath/Hubspace-Homeassistant instead as it now supports most features here.
+
+---------
 Please ask support questions in homeassistant forums: <https://community.home-assistant.io/t/new-hubspace-integration>
 
 ### Device Support
